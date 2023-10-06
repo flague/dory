@@ -53,6 +53,19 @@ class Pattern_rewriter:
         DORY_BNRelu_node.branch_in = None
         DORY_BNRelu_node.branch_change = None
         DORY_BNRelu_node.branch_last = None
+        
+        ### precision ###
+        DORY_BNRelu_node.input_activation_bits = self.graph[i[0]].input_activation_bits
+        DORY_BNRelu_node.output_activation_bits = self.graph[i[-1]].output_activation_bits
+        DORY_BNRelu_node.input_activation_type = self.graph[i[0]].input_activation_type
+        DORY_BNRelu_node.output_activation_type = self.graph[i[-1]].output_activation_type
+        DORY_BNRelu_node.constant_bits = self.graph[i[0]].constant_bits
+        DORY_BNRelu_node.constant_type = self.graph[i[0]].constant_type
+        ### approximation ###
+        DORY_BNRelu_node.approx_mul = self.graph[i[0]].approx_mul   #take value from the first node, but actually don't know whether ok or not
+        DORY_BNRelu_node.approx_mul = self.graph[i[0]].approx_mac   #take value from the first node, but actually don't know whether ok or not
+        DORY_BNRelu_node.approx_mul = self.graph[i[0]].approx_dot8   #take value from the first node, but actually don't know whether ok or not
+        DORY_BNRelu_node.mul_conf = self.graph[i[0]].mul_conf
 
         ### k ###
         for key, value in self.graph[i[0]].__dict__.items():
@@ -99,6 +112,19 @@ class Pattern_rewriter:
         DORY_Relu_node.branch_change = None
         DORY_Relu_node.branch_last = None
 
+        ### precision ###
+        DORY_Relu_node.input_activation_bits = self.graph[i[0]].input_activation_bits
+        DORY_Relu_node.output_activation_bits = self.graph[i[-1]].output_activation_bits
+        DORY_Relu_node.input_activation_type = self.graph[i[0]].input_activation_type
+        DORY_Relu_node.output_activation_type = self.graph[i[-1]].output_activation_type
+        DORY_Relu_node.constant_bits = self.graph[i[0]].constant_bits
+        DORY_Relu_node.constant_type = self.graph[i[0]].constant_type
+        ### approximation ###
+        DORY_Relu_node.approx_mul = self.graph[i[0]].approx_mul   #take value from the first node, but actually don't know whether ok or not
+        DORY_Relu_node.approx_mul = self.graph[i[0]].approx_mac   #take value from the first node, but actually don't know whether ok or not
+        DORY_Relu_node.approx_mul = self.graph[i[0]].approx_dot8   #take value from the first node, but actually don't know whether ok or not
+        DORY_Relu_node.mul_conf = self.graph[i[0]].mul_conf
+        
         ### outmul ###
         for key, value in self.graph[i[0]].__dict__.items():
             if isinstance(value, dict):
@@ -123,8 +149,17 @@ class Pattern_rewriter:
         DORY_Relu_node.outshift["value"] = round(np.log2(outshift))
         DORY_Relu_node.outshift["layout"] = ""
         if self.graph[i[-1]].name == "Clip":
-            DORY_Relu_node.min = self.graph[i[-1]].min
             DORY_Relu_node.max = self.graph[i[-1]].max
+            if (DORY_Relu_node.max == None):
+                # successive versions of onnx store min and max as inputs
+                for key,value in self.graph[i[-1]].__dict__.items():
+                    if isinstance(value, dict):     ##it is the field constant, while min and max are free
+                        DORY_Relu_node.max = int(value["value"]) #saved as float32 , needs conversion
+             
+            DORY_Relu_node.min = self.graph[i[-1]].min
+            if (DORY_Relu_node.min == None):
+                DORY_Relu_node.min = 0
+                # it is not saved in the constant field, maybe because 0?
         else:
             DORY_Relu_node.min = 0
             DORY_Relu_node.max = 255
@@ -164,6 +199,21 @@ class Pattern_rewriter:
         DORY_QAdd_node.input_indexes.append(self.graph[i[2]].input_indexes[0])
         DORY_QAdd_node.output_index = self.graph[i[-1]].output_index
         DORY_QAdd_node.number_of_input_constants = sum(self.graph[x].number_of_input_constants for x in i)
+        
+        ### precision ###
+        DORY_QAdd_node.input_activation_bits = self.graph[i[0]].input_activation_bits
+        DORY_QAdd_node.second_input_activation_bits = self.graph[i[0]].second_input_activation_bits
+        DORY_QAdd_node.output_activation_bits = self.graph[i[-1]].output_activation_bits
+        DORY_QAdd_node.input_activation_type = self.graph[i[0]].second_input_activation_type
+        DORY_QAdd_node.second_input_activation_type = self.graph[i[0]].input_activation_type
+        DORY_QAdd_node.output_activation_type = self.graph[i[-1]].output_activation_type
+        DORY_QAdd_node.constant_bits = self.graph[i[0]].constant_bits
+        DORY_QAdd_node.constant_type = self.graph[i[0]].constant_type
+        ### approximation ###
+        DORY_QAdd_node.approx_mul = self.graph[i[0]].approx_mul   #take value from the first node, but actually don't know whether ok or not
+        DORY_QAdd_node.approx_add = self.graph[i[0]].approx_add
+        DORY_QAdd_node.mul_conf = self.graph[i[0]].mul_conf
+        DORY_QAdd_node.add_conf = self.graph[i[0]].add_conf
 
         for key, value in self.graph[i[0]].__dict__.items():
             if isinstance(value, dict):

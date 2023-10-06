@@ -26,7 +26,7 @@ import sys
 import os
 import re
 
-def print_template_layer_L3(node):
+def print_template_layer_L3(node, tmpl_dir, out_dir):
     ks =      node.kernel_shape
     s =       node.strides
     g =       node.group
@@ -36,7 +36,6 @@ def print_template_layer_L3(node):
     conv_overlap2 = 2 * (ks[1] // 2) + ks[1] % 2 - 1 - (s[1] - 1)
     tk = OrderedDict([])
     tk['flag_DW'] = 1 if node.group > 1 else 0
-    tk['ULTRA_VERBOSE'] = False
 
     ################## NEED A REWRITING IN THIS TEMPLATE PART ######################
     #### VARIABLE CREATION FOR COMPATIBILITY WITH THE SECTION AFTER ################
@@ -93,10 +92,10 @@ def print_template_layer_L3(node):
     tk['n_tile_y'] = factor_h_out
     tk['verbose'] = False
     if tk['padding'] > 0:
-        tk['func_name'] = [node.prefixed_name + "_L2", node.prefixed_name + "_L2_p_t", node.prefixed_name + "_L2_p_b"]
+        tk['func_name'] = [node.name + "_L2", node.name + "_L2_p_t", node.name + "_L2_p_b"]
     else:
-        tk['func_name'] = [node.prefixed_name + "_L2"]
-    tk['func_name_L3'] = node.prefixed_name
+        tk['func_name'] = [node.name + "_L2"]
+    tk['func_name_L3'] = node.name
     tk['BitIn'] = ds_x
     tk['y_data_size_byte'] = ds_y
     tk['x_data_size_byte'] = ds_x
@@ -135,14 +134,24 @@ def print_template_layer_L3(node):
     else:
         tk['lambda_dim'] = 0
         tk['k_dim'] = 0
-    tk['dim_out'] = int( n_out_L2 * w_out_L2 * h_out_L2 * node.output_activation_bits / 8 )
-    tk['dim_in'] = int( n_in_L2 * w_in_L2 * h_in_L2 * node.input_activation_bits / 8 )
+    # do not use number of bits to prevent errors
+    tk['dim_out'] = int( n_out_L2 * w_out_L2 * h_out_L2 * ds_y / 8 ) #check
+    tk['dim_in'] = int( n_in_L2 * w_in_L2 * h_in_L2 * ds_x / 8 )      #check
 
-    tk['verbose_log'] = ""
+    tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L3_c_template.c"))
+    l = ""
+    s = tmpl.render(verbose_log=l, **tk)
+    save_string = os.path.join(out_dir, 'src', node.name + '.c')
+    with open(save_string, "w") as f:
+        f.write(s)
+    tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L3_h_template.h"))
+    l = ""
+    s = tmpl.render(verbose_log=l, **tk)
+    save_string = os.path.join(out_dir, 'inc', node.name + '.h')
+    with open(save_string, "w") as f:
+        f.write(s)
 
-    return tk
-
-def print_template_layer(node, layer_type, double_buffering = 2):
+def print_template_layer(node, layer_type, tmpl_dir, out_dir, double_buffering = 2):
     ks =      node.kernel_shape
     inp_dim = node.tiling_dimensions["L2"]["input_dimensions"][1:]
     out_dim = node.tiling_dimensions["L2"]["output_dimensions"][1:]
@@ -152,7 +161,7 @@ def print_template_layer(node, layer_type, double_buffering = 2):
     p =       node.pads
     conv_overlap_h = 2 * (ks[0] // 2) + ks[0] % 2 - 1 - (s[0] - 1)
     padding_top = p[0]; padding_left = p[1]; padding_bottom = p[2]; padding_right = p[3];
-    name_layer = node.prefixed_name + '.h'
+    name_layer = node.name + '.h'
     conv_overlap1 = 2 * (ks[0] // 2) + ks[0] % 2 - 1 - (s[0] - 1)
     conv_overlap2 = 2 * (ks[1] // 2) + ks[1] % 2 - 1 - (s[1] - 1)
     tk = OrderedDict([])
@@ -164,13 +173,11 @@ def print_template_layer(node, layer_type, double_buffering = 2):
             tk['first_layer'] = 1
     else:
         tk['first_layer'] = 0
-    tk['ULTRA_VERBOSE'] = False
-    tk['verbose_log'] = ""
     tk['node'] = node
     tk['sdk'] = node.HW_description["software development kit"]["name"]
     tk['number_of_clusters'] = node.HW_description["HW specific parameters"]["clusters"] if "clusters" in node.HW_description["HW specific parameters"].keys() else 1
     tk['optional_type'] = layer_type
-    tk['func_name'] = node.prefixed_name
+    tk['func_name'] = node.name
     tk['flag_DW'] = 1 if node.group > 1 else 0
     tk['optional'] = node.op_type
     tk['FLAG_BATCHNORM'] = 1 if 'k' in node.constant_names else 0
@@ -225,8 +232,15 @@ def print_template_layer(node, layer_type, double_buffering = 2):
     dt_W       = node.weight_type
 
     if "Addition" in node.name:
-        ds_x2  = node.second_input_activation_bits
-        dt_x2  = node.second_input_activation_type
+        if (node.input_activation_bits <= 2):
+            ds_x2 = 2
+        elif (node.input_activation_bits <= 4):
+            ds_x2 = 4
+        elif (node.input_activation_bits <= 8):
+            ds_x2 = 8
+        else:
+            ds_x2       = node.input_activation_bits
+        dt_x2  = node.input_activation_type
         tk["data_type_x2"] = dt_x2
         tk['x_data_size_byte2'] = ds_x2
         tk["inmul1"] = node.inmul1["value"]
@@ -238,9 +252,6 @@ def print_template_layer(node, layer_type, double_buffering = 2):
         tk["outmul"] = node.outmul["value"]
         tk["outadd"] = node.outadd["value"]
         tk["outshift"] = node.outshift["value"]
-
-    tk['out_mul'] = node.outmul["value"] if 'outmul' in node.constant_names else 1
-    tk['out_add'] = node.outadd["value"] if 'outadd' in node.constant_names else 0
     tk['out_shift'] = node.outshift["value"] if 'outshift' in node.constant_names else 0
 
     DW = tk['flag_DW']
@@ -262,7 +273,7 @@ def print_template_layer(node, layer_type, double_buffering = 2):
     tk['double_buffering'] = double_buffering
     tk['x_h'] = h_in
     tk['x_w'] = w_in
-    tk['x_data_size_byte'] = node.input_activation_bits
+    tk['x_data_size_byte'] = ds_x 
     tk['x_tile_size_nif'] = tile_n_in
     tk['x_tile_size_h'] = tile_h_in
     tk['x_tile_size_w'] = tile_w_in
@@ -358,8 +369,6 @@ def print_template_layer(node, layer_type, double_buffering = 2):
     tk['lambda_tile_size_byte'] = 0
     tk['k_size_byte'] = 0
     tk['lambda_size_byte'] = 0
-    tk['k_tile_size_byte_transfer'] = 0
-    tk['lambda_tile_size_byte_transfer'] = 0
     if "Pool" not in node.name:
         if tk['FLAG_BATCHNORM'] == 1:
             tk['k_size_byte'] = k_buffer_size
@@ -384,8 +393,6 @@ def print_template_layer(node, layer_type, double_buffering = 2):
     tk['l1_y_offset'] = x_buffer_size + 8
     if "Addition" in node.name:
         tk['l1_x2_offset'] = x_buffer_size + 8 + y_buffer_size + 8
-    if tk['FLAG_BATCHNORM'] == 1 and has_bias == 1:
-        breakpoint()
     if "Addition" not in node.name and "Pool" not in node.name:
         tk['l1_W_offset'] = x_buffer_size + 8 + y_buffer_size + 8
         if tk['FLAG_BATCHNORM'] == 1:
@@ -399,6 +406,7 @@ def print_template_layer(node, layer_type, double_buffering = 2):
         tk['W_tile_size_nof_last'] = n_out % tile_n_out if (n_out % tile_n_out) > 0 else tile_n_out
         tk['W_tile_size_nif_last'] = tk['W_tile_size_nif']
         tk['W_tile_size_nif_byte_last'] = int(math.ceil(tk['W_tile_size_nif_last'] * ds_W / 8.0))
+    
     # y last
     tk['y_tile_size_nof_last'] = n_out % tile_n_out if (n_out % tile_n_out) > 0 else tile_n_out
     tk['y_tile_size_h_last'] = h_out % tile_h_out if (h_out % tile_h_out) > 0 else tile_h_out
@@ -418,8 +426,13 @@ def print_template_layer(node, layer_type, double_buffering = 2):
 
     l = ""
     for k, v in tk.items():
-        l += f"// {k.ljust(30)} {v}\n"
-
+        try:
+            l += "// %s %d\n" % (k.ljust(30), v)
+        except TypeError:
+            try:
+                l += "// %s %d\n" % (k.ljust(30), v[0])
+            except TypeError:
+                l += "// %s %s\n" % (k.ljust(30), v)
     if "Addition" not in node.name and "Pool" not in node.name:
         buffer_l1_all = W_buffer_size + x_buffer_size + y_buffer_size + tk['k_tile_size_byte'] + tk['lambda_tile_size_byte'] + 40 + tk['b_size_byte']
         tk['im2col_dim'] = (8 * (fs1 * (tile_h_in + padding_bottom + padding_top) + fs1)) * int( 8 / min(ds_x, ds_y, ds_W))
@@ -429,9 +442,69 @@ def print_template_layer(node, layer_type, double_buffering = 2):
         buffer_l1_all = x_buffer_size + y_buffer_size + tk['k_tile_size_byte'] + tk['lambda_tile_size_byte'] + 40 + tk['b_size_byte']
     tk['buffer_l1_all'] = buffer_l1_all
 
+    # only used for avg pool layers
+    tk['out_add'] = node.outadd["value"] if 'outadd' in node.constant_names else 0
+    tk['out_mul'] = node.outmul["value"] if 'outmul' in node.constant_names else 1
+
     tk['conv1d'] = node.conv1d
     tk['dilations'] = node.dilations
 
-    tk['verbose_log'] = l
+    # approx mul configuration
+    if (node.approx_mul is not None and node.approx_mac is not None and node.approx_dot8 is not None):
+        approx_en = 1
+    else:
+        approx_en = 0
+    tk['approx_en'] = approx_en
+    print(approx_en)
+    #if node.approx_mac is not None:
+    if approx_en == 1: 
+        tk['approx_mul'] = node.approx_mul
+        tk['approx_mac'] = node.approx_mac
+        tk['approx_dot8'] = node.approx_dot8
+        #if (node.approx_mul == 1 or node.approx_mac == 1 or node.approx_dot8 == 1):
+            ##configuration of the csr csr_mul_conf csr_reset_conf
+            #tk['csr_reset_conf'] = 0
+        if "Addition" not in node.name and "Pool" not in node.name: #only for Conv and FC
+            mask = np.uint32(0)
+            #if ("FullyConnected" in node.name):     #can immediately activete approx multiplier, no exact mac in between
+            #    active_approx_hw = (node.approx_dot8 << 2) | (node.approx_mac << 1) | node.approx_mul
+            #    mask = mask | active_approx_hw
+            approx_mask = np.uint8(~(node.mul_conf))
+            mask = mask |(approx_mask << 3)
+            print(node.name, node.input_activation_bits, node.weight_bits)
+            #res_bits = node.input_activation_bits + node.weight_bits +2 -4 #-4 as mask is on 14 bits, not 18
+            # +2 as I have added 1 to both weight and act bit in NEMO CHECK
+            res_bits = node.precision_mul
+            res_mask = np.uint16(2**(res_bits)-1)
+            mask = mask | (res_mask<<18)
+            tk['csr_mul_conf'] = mask   #write the mask, except the activation of the approximate operations, this will be done inside the specific pulp kernel
+    else:
+        tk['approx_mul'] = node.approx_mul
+        tk['approx_mac'] = node.approx_mac
+        tk['approx_dot8'] = node.approx_dot8
+        tk['csr_mul_conf'] = 0
 
-    return tk
+    if "Addition" not in node.name and "Pool" not in node.name:
+        tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L2_c_conv_template.c"))
+    elif "Pool" in node.name:
+        if(layer_type == '1D_Conv'):
+            tmpl = Template(filename=os.path.join(tmpl_dir, "pooling_layer_1D_template.c"))
+        else:
+            tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L2_c_pooling_template.c"))
+    elif "Addition" in node.name:
+        if(layer_type == '1D_Conv'):
+            tmpl = Template(filename=os.path.join(tmpl_dir, "add_layer_1D_template.c"))
+        else:
+            tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L2_c_addition_template.c"))
+
+    s_c = tmpl.render(verbose_log=l, **tk)
+    save_string = os.path.join(out_dir, 'src', name_layer.replace("h", "c"))
+    with open(save_string, "w") as f:
+        f.write(s_c)
+    tmpl = Template(filename=os.path.join(tmpl_dir, "layer_L2_h_template.h"))
+    s = tmpl.render(verbose_log=l, **tk)
+    save_string = os.path.join(out_dir, 'inc', name_layer)
+    with open(save_string, "w") as f:
+        f.write(s)
+    return s, s_c
+

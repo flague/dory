@@ -52,18 +52,18 @@ class DORY_node:
         self.output_activation_type = None
         self.input_activation_type = None
         self.second_input_activation_type = None
+        self.approx_mul = None      # 1 if node uses approx mult
+        self.approx_mac = None
+        self.approx_dot8 = None
+        #self.approx_add = None      # 1 if node uses approx add
+        self.precision_mul = None
+        self.mul_conf = None        # conf of the multiplier, approx level
+        #self.add_conf = None        # conf of the adder, approx level
+        #self.CSR_approx = None
         self.n_test_inputs = None
         self.conv1d = None
         self.min = None
         self.max = None
-        self.prefix = None
-
-    @property
-    def prefixed_name(self):
-        if self.name and self.prefix:
-            return self.prefix + self.name
-
-        return self.name
 
     def print_parameters(self):
         for parameter in self.__dict__:
@@ -90,7 +90,7 @@ class DORY_node:
             if isinstance(value, type(None)) or (isinstance(value, list) and len(value) == 0):
                 sys.exit("DORY FRONTEND error. Missing some Node initialization. Stopping at argument {}".format(key))
 
-    def populate_DORY_node(self, node_iterating, graph, prefix=""):
+    def populate_DORY_node(self, node_iterating, graph):
         DORY_parameters = {}
         #### Names: Convolution, Addition, FullyConnected, Pooling
         mapping_names = {'AveragePool': 'Pooling', 
@@ -116,7 +116,6 @@ class DORY_node:
         DORY_parameters['output_index'] = node_iterating.output[0]
         DORY_parameters['number_of_input_nodes'] = len(DORY_parameters['input_indexes'])
         DORY_parameters['number_of_input_constants'] = len(DORY_parameters['constant_names'])
-        DORY_parameters['prefix'] = prefix
         self.add_existing_dict_parameter(DORY_parameters)
 
         self.add_constants(node_iterating, graph)
@@ -125,6 +124,46 @@ class DORY_node:
             self.name = node_iterating.op_type
 
         self.add_special_attributes(node_iterating)
+
+    # for every DORY node add precision parameters read from NEMO graph 
+    def add_precision_DORY_node(self, node_iterating, nemo_json):
+        NEMO_graph = nemo_json["graph"] 
+        DORY_parameters = {}
+        for NEMO_node in NEMO_graph:
+            if(node_iterating.name == NEMO_node["name"]): #same name of onnx
+                #retrieve precision, json file contains all parameters for each node, if they are not present
+                # or not initialized null will be copied
+                DORY_parameters["input_activation_bits"] = NEMO_node["DORY_node_parameters"]["input_activation_bits"]
+                DORY_parameters["output_activation_bits"] = NEMO_node["DORY_node_parameters"]["output_activation_bits"]
+                DORY_parameters["input_activation_type"] = NEMO_node["DORY_node_parameters"]["input_activation_type"]
+                DORY_parameters["output_activation_type"] = NEMO_node["DORY_node_parameters"]["input_activation_type"]
+                DORY_parameters["weight_type"] = NEMO_node["DORY_node_parameters"]["weight_type"]
+                #DORY_parameters["bias_type"] = NEMO_node["DORY_node_parameters"]["bias_type"]
+                DORY_parameters["constant_type"] = NEMO_node["DORY_node_parameters"]["constant_type"]
+                DORY_parameters["output_activation_type"] = NEMO_node["DORY_node_parameters"]["input_activation_type"]
+                if(node_iterating.op_type in ["Conv", "MatMul"]):
+                    DORY_parameters["weight_bits"] = NEMO_node["DORY_node_parameters"]["weight_bits"]
+                    DORY_parameters["bias_bits"] = NEMO_node["DORY_node_parameters"]["bias_bits"]
+                else:
+                    DORY_parameters["constant_bits"] = NEMO_node["DORY_node_parameters"]["constant_bits"]
+                #retrieve approx
+                #print(node_iterating.name, DORY_parameters)
+                self.add_existing_dict_parameter(DORY_parameters)
+    # for every DORY node add approximation parameters read from NEMO graph 
+    def add_approximation_DORY_node(self, node_iterating, nemo_json):
+        NEMO_graph = nemo_json["graph"] 
+        DORY_parameters = {}
+        for NEMO_node in NEMO_graph:
+            if(node_iterating.name == NEMO_node["name"]): #same name of onnx
+                #print(node_iterating.name)
+                DORY_parameters["approx_mul"] = NEMO_node["DORY_node_parameters"]["approx_mul"]
+                DORY_parameters["approx_mac"] = NEMO_node["DORY_node_parameters"]["approx_mac"]
+                DORY_parameters["approx_dot8"] = NEMO_node["DORY_node_parameters"]["approx_dot8"]
+                #DORY_parameters["approx_add"] = NEMO_node["DORY_node_parameters"]["approx_add"]
+                DORY_parameters["mul_conf"] = NEMO_node["DORY_node_parameters"]["mul_conf"]
+                #DORY_parameters["add_conf"] = NEMO_node["DORY_node_parameters"]["add_conf"]
+                DORY_parameters["precision_mul"] = NEMO_node["DORY_node_parameters"]["precision_mul"]
+                self.add_existing_dict_parameter(DORY_parameters)
 
     def add_constants(self, node_iterating, graph):
         '''

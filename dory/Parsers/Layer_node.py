@@ -42,7 +42,6 @@ class Layer_node(DORY_node):
         self.input_activation_memory = None
         self.output_activation_memory = None
         self.layout = None
-        self.prefix = ""
 
     def update_input_dimensions(self, activation_tensor, Layer_parameters):
         if activation_tensor.name in self.input_indexes:
@@ -79,10 +78,9 @@ class Layer_node(DORY_node):
                 Layer_parameters["output_dimensions"] =  [1, 1]
         return Layer_parameters
 
-    def populate_Layer_node(self, node_iterating, graph, prefix=""):
+    def populate_Layer_node(self, node_iterating, graph):
         self.populate_DORY_node(node_iterating,graph)
         Layer_parameters = {}
-        Layer_parameters['prefix'] = prefix
         ## kernel_shape, dilations, group, strides, pads DEFAULTS
         if self.name in ['FullyConnected', 'Addition']:
             Layer_parameters['kernel_shape'] = [1, 1]
@@ -109,7 +107,7 @@ class Layer_node(DORY_node):
             Layer_parameters = self.update_output_dimensions(activation_tensor, Layer_parameters)
         for activation_tensor in graph.graph.output:
             Layer_parameters = self.update_output_dimensions(activation_tensor, Layer_parameters)
-        if 'Global' in node_iterating.op_type:
+        if 'Global' in node_iterating.name:
             Layer_parameters['kernel_shape'] = Layer_parameters['input_dimensions']
             Layer_parameters['strides'] = [1, 1]
         #### Adding control for layers with g > 1. Only DW (groups = input channels = output channels) and g=1 supported.
@@ -118,14 +116,17 @@ class Layer_node(DORY_node):
                 print(" Depthwise convolution with input channels != output channels != groups")
                 os._exit(0)
         self.add_existing_dict_parameter(Layer_parameters)
+    
+    def add_precision_Layer_node(self, node_iterating, nemo_json):
+        self.add_precision_DORY_node(node_iterating,nemo_json)
+    
+    def add_approximation_Layer_node(self, node_iterating, nemo_json):
+        self.add_approximation_DORY_node(node_iterating,nemo_json)
 
     def add_memory_and_MACs(self):
         if "Convolution" in self.name or "FullyConnected" in self.name:
             self.add_existing_parameter("MACs", int(np.prod(self.output_dimensions)*self.output_channels*self.input_channels*np.prod(self.kernel_shape)/self.group))
-            if self.group == 1:
-                self.add_existing_parameter("weight_memory", int(self.output_channels*self.input_channels*np.prod(self.kernel_shape)/self.group*self.weight_bits/8))
-            else:
-                self.add_existing_parameter("weight_memory", int(self.output_channels*self.input_channels*np.prod(self.kernel_shape)/self.group*16*self.weight_bits/8))
+            self.add_existing_parameter("weight_memory", int(self.output_channels*self.input_channels*np.prod(self.kernel_shape)/self.group*self.weight_bits/8))
         else:
             self.add_existing_parameter("MACs", int(0))
             self.add_existing_parameter("weight_memory", int(0))
@@ -138,10 +139,7 @@ class Layer_node(DORY_node):
                 constants_memory+=self.output_channels*self.constant_bits/8
             if "bias" in name:
                 bias_memory+=self.output_channels*self.bias_bits/8
-        if self.group == 1:
-            self.add_existing_parameter("bias_memory", int(bias_memory))
-        else:
-            self.add_existing_parameter("bias_memory", int(bias_memory*16))
+        self.add_existing_parameter("bias_memory", int(bias_memory))
         self.add_existing_parameter("constants_memory", int(constants_memory))
 
 

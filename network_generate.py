@@ -28,7 +28,7 @@ import json
 from importlib import import_module
 
 
-def dory_to_c(graph, target, conf, confdir, verbose_level, perf_layer, optional, appdir, n_inputs):
+def dory_to_c(graph, target, conf, confdir, verbose_level, perf_layer, optional, arch, appdir, n_inputs):
     # Including and running the transformation from DORY IR to DORY HW IR
     onnx_manager = import_module(f'dory.Hardware_targets.{target}.HW_Parser')
     dory_to_dory_hw = onnx_manager.onnx_manager
@@ -37,15 +37,13 @@ def dory_to_c(graph, target, conf, confdir, verbose_level, perf_layer, optional,
     # Deployment of the model on the target architecture
     onnx_manager = import_module(f'dory.Hardware_targets.{target}.C_Parser')
     dory_hw_to_c = onnx_manager.C_Parser
-    dory_hw_to_c(graph, conf, confdir, verbose_level, perf_layer, optional, appdir, n_inputs).full_graph_parsing()
+    dory_hw_to_c(graph, conf, confdir, verbose_level, perf_layer, optional, arch, appdir, n_inputs).full_graph_parsing()
 
 
-def network_generate(frontend, target, conf_file, verbose_level='Check_all+Perf_final', perf_layer='No', optional='auto',
-                     appdir='./application', prefix=""):
+def network_generate(frontend, target, conf_file, verbose_level='Check_all+Perf_final', perf_layer='No', optional='auto', arch='approx',
+                     appdir='./application'):
     print(f"Using {frontend} as frontend. Targeting {target} platform. ")
 
-    if len(prefix) > 0 and prefix[-1] != "_":
-        prefix += "_"
     # Reading the json configuration file
     with open(conf_file) as f:
         conf = json.load(f)
@@ -65,34 +63,33 @@ def network_generate(frontend, target, conf_file, verbose_level='Check_all+Perf_
     # Including and running the transformation from Onnx to a DORY compatible graph
     onnx_manager = import_module(f'dory.Frontend_frameworks.{frontend}.Parser')
     onnx_to_dory = onnx_manager.onnx_manager
-    graph = onnx_to_dory(onnx_file, conf, prefix).full_graph_parsing()
+    graph = onnx_to_dory(onnx_file, conf).full_graph_parsing()
 
-    dory_to_c(graph, target, conf, confdir, verbose_level, perf_layer, optional, appdir, n_inputs)
+    dory_to_c(graph, target, conf, confdir, verbose_level, perf_layer, optional, arch,  appdir, n_inputs)
 
 
 if __name__ == '__main__':
     Frontends = ["NEMO", "Quantlab"]
-    Hardware_targets = ["PULP.GAP8", "PULP.GAP8_L2", "PULP.PULP_gvsoc", "PULP.GAP9", "nnx.ne16", "Occamy", "Diana.Diana_TVM", "Diana.Diana_SoC"]
-    verbose_levels = ["None", "Perf_final", "Check_all+Perf_final", "Last+Perf_final"]
-    optional_choices = ["auto", "8bit", "mixed-hw", "mixed-sw"]
+    Hardware_targets = ["PULP.GAP8", "PULP.GAP8_L2", "PULP.PULP_gvsoc", "nnx.ne16", "Occamy", "Diana.Diana_TVM", "Diana.Diana_SoC"]
 
     parser = argparse.ArgumentParser(formatter_class=RawTextHelpFormatter)
     parser.add_argument('frontend', type=str, choices=Frontends, help='Frontend from which the onnx is produced and from which the network has been trained')
     parser.add_argument('hardware_target', type=str, choices=Hardware_targets, help='Hardware platform for which the code is optimized')
     parser.add_argument('config_file', type=str, help='Path to the JSON file that specifies the ONNX file of the network and other information.')
-    parser.add_argument('--verbose_level', choices=verbose_levels, default='Check_all+Perf_final',
+    parser.add_argument('--verbose_level', default='Check_all+Perf_final',
                         help="None: No_printf.\n"
                              "Perf_final: only total performance\n"
                              "Check_all+Perf_final: all check + final performances \n"
                              "Last+Perf_final: all check + final performances \n"
                              "Extract the parameters from the onnx model")
-    parser.add_argument('--perf_layer', action='store_true', help='Print the performance of each layer.')
-    parser.add_argument('--optional', default='auto', choices=optional_choices,
+    parser.add_argument('--perf_layer', default='No', help='Yes: MAC/cycles per layer. No: No perf per layer.')
+    parser.add_argument('--optional', default='auto',
                         help='auto (based on layer precision, 8bits or mixed-sw), 8bit, mixed-hw, mixed-sw')
+    parser.add_argument('--arch', default='approx',
+            help='approx: choose architecture with approximate cores, exact')
     parser.add_argument('--app_dir', default='./application', help='Path to the generated application. Default: ./application')
-    parser.add_argument('--prefix', default="", help='Prefix to prepend to network-specific generated functions', type=str)
 
     args = parser.parse_args()
 
-    network_generate(args.frontend, args.hardware_target, args.config_file, args.verbose_level, 'Yes' if args.perf_layer else 'No',
-                     args.optional, args.app_dir, args.prefix)
+    network_generate(args.frontend, args.hardware_target, args.config_file, args.verbose_level, args.perf_layer,
+                     args.optional, args.arch, args.app_dir)

@@ -220,6 +220,11 @@ void ${func_name}(
 
   pi_cl_team_barrier(0);
 
+   //added part for the approximation
+% if approx_en == 1:
+  __asm__ __volatile__ ("csrw 0x7D0, %0" ::  "r" (${csr_mul_conf}) );     // Set the bit for approx mul in the selected CSR
+% endif
+
 % if flag_DW == 0:
   int total_tiles = ${tile_dim_nof * tile_dim_nif * tile_dim_h * tile_dim_w};
 % else:
@@ -404,7 +409,7 @@ void ${func_name}(
   % elif flag_DW == 0 and 'mixed' in optional_type  and ('Gemm' in func_name or 'MatMul' in func_name or 'FullyConnected' in func_name) and y_data_size_byte == 32:
     ${"x" if 'hw' in optional_type else ""}pulp_nn_linear_${data_type_x[0]}${x_data_size_byte}_${data_type_y[0]}${y_data_size_byte}_${data_type_weights[0]}${W_data_size_byte}(
   % elif flag_DW == 0 and 'mixed' in optional_type  and ('Gemm' in func_name or 'MatMul' in func_name or 'FullyConnected' in func_name):
-  ${"x" if 'hw' in optional_type else ""}pulp_nn_linear_${data_type_x[0]}${x_data_size_byte}_${data_type_y[0]}${y_data_size_byte}_${data_type_weights[0]}${W_data_size_byte}(
+    pulp_nn_linear_${data_type_x[0]}${x_data_size_byte}_${data_type_y[0]}${y_data_size_byte}_${data_type_weights[0]}${W_data_size_byte}(
   % elif flag_DW == 1 and optional_type == '8bit' and fs1 == 3 and fs2 == 3 and stride==1:
     pulp_nn_depthwise_generic(
   % elif flag_DW == 1 and optional_type == '8bit' and fs1*fs2 < 4:
